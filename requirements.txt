@@ -1,0 +1,20 @@
+# Tested environment (Linux)
+#   Python  3.11.14
+#   CUDA    12.8   (PyTorch cu128 build, nvcc 12.8.93, NVIDIA driver 590.48.01)
+#   g++ 13.3, ninja 1.13.2 -- torch JIT-builds the sampler C++ extension (sampling/cpp/*.cpp) on first run.
+# Install: pip install -r requirements.txt
+--extra-index-url https://download.pytorch.org/whl/cu128
+
+# Training
+torch==2.10.0
+torch_geometric==2.7.0
+numpy==2.3.5
+tqdm==4.67.3
+ninja
+
+# Data preprocessing
+pymetis==2025.2.2    # preprocess/do_metis_new.py
+ogb==1.3.6           # preprocess/convert_ogb_raw.py
+
+# Optional: training-curve PNGs (main/run_falcon.py); skipped if not installed.
+# matplotlib==3.10.8
