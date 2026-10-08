@@ -3,7 +3,7 @@
 Intra-Cluster Subsampling: per-epoch stratified node subsampling over a fixed
 partition, feeding the in-memory G* materialize pipeline.
 
-Ported from Ginex_with_intra/lib but detached from GINEX's disk fanout sampler --
+Ported from our Ginex-based prototype but detached from Ginex's disk fanout sampler --
 here the partition drives an in-memory graph, not a runtime C++ neighbor mask.
 
 Stages:

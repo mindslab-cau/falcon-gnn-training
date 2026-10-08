@@ -37,7 +37,7 @@ from .part import load_part_id
 
 # Known (symmetric CSC dir, default part_id) pairs, relative to the repo root
 # (the directory that holds sampling/). csc_dir holds indptr.dat / indices.dat /
-# conf.json in the Ginex layout (see lib/data.py); part_id.pth is what
+# conf.json in the Ginex layout; part_id.pth is what
 # preprocess/do_metis_new.py writes by default.
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 

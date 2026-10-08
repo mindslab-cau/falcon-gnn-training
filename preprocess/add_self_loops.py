@@ -13,7 +13,7 @@ that already held its self citation is left alone rather than doubled.
 
 nc_score.pth is refreshed too, with the same formula prepare_dataset_sym.py uses, so a
 dir stays usable by Ginex. Its neighbor cache proper -- nc_size_*.dat / nctbl_*.dat --
-is built by Ginex_with_intra/create_neigh_cache.py, not by either of these scripts; the
+is built by Ginex's create_neigh_cache.py, not by either of these scripts; the
 run prints the exact command to rebuild whatever it finds. Nothing in FALCON reads any of
 the three, so skipping them costs an FALCON-only workflow nothing.
 
@@ -69,7 +69,7 @@ def _check_sorted_unique(seg, rows):
 def _write_nc_score(csc_dir, mode, ref_count, col_degree):
     """nc_score.pth, byte-for-byte the formula prepare_dataset_sym.py writes.
 
-    lib/cache.py ranks a node by out-neighbors / in-neighbors: how often its adjacency
+    Ginex's NeighborCache (lib/cache.py) ranks a node by out-neighbors / in-neighbors: how often its adjacency
     list is requested, over how much cache space it costs. Both counts are taken on the
     final graph, so the self entry is included on each side -- on a symmetric graph the
     ratio stays 1 everywhere, self-loops or not. Steers caching only, never accuracy.
@@ -97,11 +97,11 @@ def _warn_stale_neighbor_cache(csc_dir):
     for p in caches:
         print(f'  {os.path.basename(p)}')
     sizes = [m.group(1) for m in (re.search(r'nc_size_(\d+)\.dat$', p) for p in caches) if m]
-    # create_neigh_cache.py builds its path as ./dataset/<--dataset>-ginex, so the flag
+    # Ginex's create_neigh_cache.py builds its path as ./dataset/<--dataset>-ginex, so the flag
     # is the dir name minus that suffix -- not the short alias FALCON uses (papers/products).
     base = os.path.basename(os.path.normpath(csc_dir))
     name = base[:-len('-ginex')] if base.endswith('-ginex') else base
-    print('FALCON never reads these. To refresh them for Ginex, from Ginex_with_intra/:')
+    print('FALCON never reads these. To refresh them for Ginex, from the Ginex checkout:')
     for s in sizes:
         print(f'  python create_neigh_cache.py --dataset {name} --neigh-cache-size {s}')
 

@@ -55,9 +55,9 @@ bench_cluster_batch 에서 A2(클러스터 단위 시드)가 products 14.5배로
     chunk=128   q~8
     global      완전 무작위 (현재 방법 A)
 
-학습 전제는 run_ics_v2 와 동일하게 유지한다:
+학습 전제:
   - intra CSC + 매 epoch 새 노드 서브샘플 (factor, sample(epoch)) -> 랜덤성 유지
-  - fanout 10/10/10, bs 1024, sage h256 L3 dropout 0.5, lr 3e-3 (v2 기본값)
+  - fanout 10/10/10, bs 1024, sage h256 L3 dropout 0.2, lr 1e-3 (기본값)
   - 평가는 원본 전체 그래프 (필터 없음)
 
 **test leakage 있음**: 매 epoch val 과 test 를 둘 다 재고, best 모델을 **test 기준**으로
@@ -799,9 +799,8 @@ def _all_mean(v):
 def save_outputs(out_dir, config, hist, best, total_time_sec):
     """meta.json / metrics.json / metrics.csv / png 3장을 (재)기록한다.
 
-    run_ics_v2.save_outputs 와 같은 키 이름을 쓴다 -- 두 실험의 결과를 같은 도구로 읽기
-    위해서다(report.py 주석: Capsule 이 meta.json 과 metrics.json 두 이름을 다 읽는다).
-    v2 의 'eval_sec' 한 칸에 대응하는 것이 여기서는 val+test 라서 그 둘의 합을 넣고,
+    meta.json 과 metrics.json 은 같은 내용이다 -- 결과를 읽는 도구가 둘 중 어느 이름을 찾든
+    되게 두 번 쓴다. 이전 버전의 'eval_sec' 한 칸에 대응하는 것이 여기서는 val+test 라서 그 둘의 합을 넣고,
     쪼갠 값은 val_sec_list / test_sec_list 로 따로 남긴다.
 
     매 epoch 끝에 통째로 다시 쓴다 -> 중간에 끊겨도 완료분은 남는다.

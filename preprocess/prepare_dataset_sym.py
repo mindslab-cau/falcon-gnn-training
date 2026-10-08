@@ -1,6 +1,6 @@
 """Build a Ginex dataset directory, symmetrizing the graph by default.
 
-Differs from prepare_dataset.py in two things.
+Differs from Ginex's original dataset builder in two things.
 
 First, every raw directed edge (s -> d)
 also contributes a reverse entry, so the CSC column of a node holds both the
@@ -17,7 +17,7 @@ during neighbor aggregation", and reports 3.3B edges for papers100M.
 Second, every node gets exactly one self-loop, so a fanout sample of a node can
 draw the node's own features and an isolated node still aggregates something
 instead of producing a zero neighbor sum. DiskGNN's loader does the same --
-load_graph.py runs remove_self_loop then add_self_loop -- so the two systems walk
+its loader runs remove_self_loop then add_self_loop -- so the two systems walk
 the same adjacency. "Exactly one" matters: the raw list already contains a few
 self citations, and those are collapsed rather than doubled.
 
@@ -51,10 +51,10 @@ def parse_args():
     parser.add_argument('--chunk-edges', type=int, default=8_000_000)
     parser.add_argument('--keep-tmp', action='store_true')
     parser.add_argument('--no-symmetrize', dest='symmetrize', action='store_false',
-                        help='keep the raw directed CSC, as prepare_dataset.py does.')
+                        help='keep the raw directed CSC, as Ginex\'s original builder does.')
     parser.add_argument('--no-self-loop', dest='self_loop', action='store_false',
                         help='do not add a self-loop to every node, as '
-                             'prepare_dataset.py does.')
+                             'Ginex\'s original builder does.')
     parser.add_argument('--score', choices=['ginex', 'degree'], default='ginex',
                         help="nc_score.pth formula. 'ginex' is upstream's "
                              'out-degree/in-degree; on a symmetric graph the two are '
@@ -254,7 +254,7 @@ def build_degree_and_csc(raw_dir, out_dir, tmp_dir, num_nodes, num_edges, chunk_
     canonical_indptr.tofile(indptr_tmp)
     os.replace(indptr_tmp, out_dir / 'indptr.dat')
 
-    # lib/cache.py NeighborCache scores a node by out-neighbors / in-neighbors: how
+    # Ginex's NeighborCache (lib/cache.py in Ginex) scores a node by out-neighbors / in-neighbors: how
     # often its adjacency list gets requested, over how much cache space it costs.
     # On a symmetric graph those are the same number, so the ratio is 1 everywhere
     # and the ranking carries no signal -- hence --score degree as an alternative.

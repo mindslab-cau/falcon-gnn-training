@@ -7,12 +7,14 @@ O(N) ID/pointer arrays live in RAM; feature and edge copies use bounded blocks.
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 import time
 
 import numpy as np
 import torch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # repo root, so `python preprocess/reorder_metis.py` works without -m
 from sampling.intra_edges import _dataset_paths
 
 

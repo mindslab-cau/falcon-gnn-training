@@ -1,6 +1,6 @@
 """part_id loading and validation, shared by every FALCON sampling stage.
 
-Extracted from Ginex_with_intra/lib/epoch_sampler_intra.py so the node subsampler
+Factored out so the node subsampler
 and the intra-edge precompute read the partition through one code path.
 
 part_id[v] is the cluster id of node v. It was produced over the SYMMETRIC CSC the

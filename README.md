@@ -33,6 +33,10 @@ Each dataset goes through four steps:
    training reads,
 4. train.
 
+The scripts do not download anything. For the OGB datasets, fetch the zip from OGB and
+unzip it under `data/ogb/` first (step 0 below); `convert_ogb_raw.py` then reads the
+extracted folder.
+
 The `--dataset` value differs between tools: `do_metis_new.py` takes the *graph name*
 (`ogbn-products`, `ogbn-papers100M`, `friendster`), while `reorder_metis.py` and
 `run_falcon.py` take the short name (`products`, `papers`, `friendster`). The folder
@@ -41,7 +45,10 @@ names below are the ones the code looks up by default.
 ### 2.1 ogbn-products
 
 ```bash
-# step 1: OGB download -> data/raw/products/*.bin -> data/ogbn-products/
+# step 0: download (1.4 GB) and unzip -> data/ogb/products/
+mkdir -p data/ogb && (cd data/ogb && wget http://snap.stanford.edu/ogb/data/nodeproppred/products.zip && unzip -q products.zip)
+
+# step 1: data/ogb/products/ -> data/raw/products/*.bin -> data/ogbn-products/
 python preprocess/convert_ogb_raw.py --dataset ogbn-products
 python preprocess/prepare_dataset_sym.py --raw-dir data/raw/products --out-dir data/ogbn-products \
     --num-features 100 --num-classes 47
@@ -55,12 +62,15 @@ python preprocess/reorder_metis.py --dataset products --part-k 1000
 
 ### 2.2 ogbn-papers100M
 
-`convert_ogb_raw.py` downloads `papers100M-bin.zip` (~57 GB) into `data/ogb/` and streams
-it out without loading it into RAM. If you already have the extracted
-`papers100M-bin/` folder, pass it with `--ogb-dir`.
+`convert_ogb_raw.py` streams the arrays out of the extracted zip without loading them
+into RAM. If the extracted `papers100M-bin/` folder lives elsewhere, pass it with
+`--ogb-dir`.
 
 ```bash
-# step 1 -> data/raw/papers100M/*.bin -> data/ogbn-papers100M-sym/   (symmetrized, self-loops added)
+# step 0: download (57 GB) and unzip -> data/ogb/papers100M-bin/
+mkdir -p data/ogb && (cd data/ogb && wget http://snap.stanford.edu/ogb/data/nodeproppred/papers100M-bin.zip && unzip -q papers100M-bin.zip)
+
+# step 1: data/ogb/papers100M-bin/ -> data/raw/papers100M/*.bin -> data/ogbn-papers100M-sym/   (symmetrized, self-loops added)
 python preprocess/convert_ogb_raw.py --dataset ogbn-papers100M
 python preprocess/prepare_dataset_sym.py            # defaults are the papers100M paths; needs ~26 GB in --tmp-dir (default /tmp)
 
@@ -130,7 +140,7 @@ main/run_falcon.py            training script
 model/models.py               GraphSAGE / GCN (PyTorch Geometric)
 sampling/                     node subsampling, masked neighbor loaders, C++ samplers (sampling/cpp/)
 preprocess/
-  convert_ogb_raw.py          OGB download -> flat .bin files
+  convert_ogb_raw.py          extracted OGB download -> flat .bin files
   prepare_dataset_sym.py      .bin files -> symmetric CSC graph directory
   prepare_friendster.py       SNAP Friendster -> CSC graph directory
   add_self_loops.py           add self-loops to an existing graph directory (not needed for the paths above)

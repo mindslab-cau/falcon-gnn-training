@@ -1,19 +1,27 @@
-"""Dump an OGB node-property dataset into the flat binary layout prepare_dataset_sym.py reads.
+"""Convert an extracted OGB download into the flat binary layout prepare_dataset_sym.py reads.
 
+This script does not download anything. Fetch the dataset from OGB yourself and unzip it
+under data/ogb/ (any location works with --ogb-dir):
+
+    mkdir -p data/ogb && cd data/ogb
+    wget http://snap.stanford.edu/ogb/data/nodeproppred/products.zip        && unzip products.zip        # 1.4 GB -> products/
+    wget http://snap.stanford.edu/ogb/data/nodeproppred/papers100M-bin.zip  && unzip papers100M-bin.zip  # 57 GB  -> papers100M-bin/
+
+Input (the folder the zip extracts to):
+    products/        raw/edge.csv.gz, node-feat.csv.gz, node-label.csv.gz; split/sales_ranking/*.csv.gz
+    papers100M-bin/  raw/data.npz (edge_index, node_feat), raw/node-label.npz; split/time/*.csv.gz
 Output (data/raw/<products|papers100M>/):
-    srcList.bin, dstList.bin   int32 [E]      directed edge list (OGB edge_index rows 0 and 1)
+    srcList.bin, dstList.bin   int32 [E]      directed edge list
     feat.bin                   float32 [N*D]  node features, row-major
     labels.bin                 int64 [N]      class id, -1 where OGB has no label (NaN)
     trainIds.bin, valIds.bin, testIds.bin     int64, OGB's official split
 
-ogbn-products  is loaded through the ogb package (it downloads products.zip into
-               data/ogb/ and adds the reverse of every edge, as OGB specifies).
-ogbn-papers100M is too large to materialize in RAM (57 GB features + 26 GB edges), so
-               it is streamed straight out of the npz members of papers100M-bin.zip.
-               The zip is downloaded into data/ogb/ on first use; a pre-extracted copy can
-               be pointed at with --ogb-dir (the folder that holds raw/data.npz).
+ogbn-products  edge.csv.gz lists each undirected edge once; as OGB does, both directions
+               are written. Everything fits in RAM (~3 GB).
+ogbn-papers100M is too large to materialize (57 GB features + 26 GB edges), so the arrays
+               are streamed straight out of the npz members without loading them.
 
-Next step (from the repo root):
+Run (from the repo root):
     python preprocess/convert_ogb_raw.py --dataset ogbn-products
     python preprocess/prepare_dataset_sym.py --raw-dir data/raw/products --out-dir data/ogbn-products \\
         --num-features 100 --num-classes 47
@@ -32,9 +40,9 @@ from numpy.lib import format as npfmt
 _ROOT = Path(__file__).resolve().parents[1]
 OGB_URL = 'http://snap.stanford.edu/ogb/data/nodeproppred/'
 DATASETS = {
-    #  name            download zip          folder inside the zip   raw output folder
-    'ogbn-products':   ('products.zip',       'products',            'products'),
-    'ogbn-papers100M': ('papers100M-bin.zip', 'papers100M-bin',      'papers100M'),
+    #  name              zip name              extracted folder    raw output folder  file that must exist
+    'ogbn-products':   ('products.zip',       'products',         'products',        'raw/edge.csv.gz'),
+    'ogbn-papers100M': ('papers100M-bin.zip', 'papers100M-bin',   'papers100M',      'raw/data.npz'),
 }
 CHUNK = 16_000_000          # elements per read when converting dtypes
 COPY_BYTES = 64 << 20       # bytes per read when copying as-is
@@ -53,29 +61,53 @@ def write_ids(path, ids):
     print(f'  {path.name}: {ids.size:,} ids', flush=True)
 
 
-# ---------------------------------------------------------------- ogbn-products (in RAM)
-def convert_products(out, ogb_root):
-    # ogb 1.3.6 caches the parsed graph with torch.save and reads it back with a bare
-    # torch.load(); torch >= 2.6 defaults to weights_only=True, which rejects the numpy
-    # arrays in that cache. The cache is written by this process from OGB's own CSVs.
-    os.environ.setdefault('TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD', '1')
-    from ogb.nodeproppred import NodePropPredDataset
-    ds = NodePropPredDataset('ogbn-products', root=str(ogb_root))
-    graph, labels = ds[0]
-    split = ds.get_idx_split()
-    ei = graph['edge_index']
-    if ei.max() >= 2 ** 31:
+def write_labels(out, labels):
+    labels = np.asarray(labels)
+    if np.issubdtype(labels.dtype, np.floating):          # papers100M: NaN = unlabeled
+        known = ~np.isnan(labels)
+        out_lab = np.full(labels.shape, -1, dtype=np.int64)
+        out_lab[known] = labels[known].astype(np.int64)
+    else:
+        out_lab = labels.astype(np.int64)
+    write_atomic(out / 'labels.bin', lambda f: out_lab.tofile(f))
+    print(f'  labels.bin: {out_lab.size:,} nodes, {int((out_lab >= 0).sum()):,} labeled, '
+          f'{int(out_lab.max()) + 1} classes', flush=True)
+
+
+def read_split_csv(path):
+    with gzip.open(path, 'rt') as g:
+        return np.loadtxt(g, dtype=np.int64, delimiter=',').reshape(-1)
+
+
+# ---------------------------------------------------------------- ogbn-products (CSV, in RAM)
+def convert_products(out, ogb_dir):
+    import pandas as pd
+    raw = ogb_dir / 'raw'
+    print('reading edge.csv.gz', flush=True)
+    edge = pd.read_csv(raw / 'edge.csv.gz', header=None, dtype=np.int64).values.T     # [2, E_undirected]
+    # OGB stores each products edge once and adds the reverse at load time, interleaved
+    # as (u,v),(v,u). Do the same so the directed list matches what OGB loaders produce.
+    both = np.repeat(edge, 2, axis=1)
+    both[0, 1::2] = edge[1]
+    both[1, 1::2] = edge[0]
+    if both.max() >= 2 ** 31:
         raise ValueError('node ids do not fit int32')
-    print(f'nodes={graph["num_nodes"]:,} directed edges={ei.shape[1]:,} feat={graph["node_feat"].shape}', flush=True)
-    write_atomic(out / 'srcList.bin', lambda f: ei[0].astype(np.int32).tofile(f))
-    write_atomic(out / 'dstList.bin', lambda f: ei[1].astype(np.int32).tofile(f))
-    write_atomic(out / 'feat.bin', lambda f: np.ascontiguousarray(graph['node_feat'], dtype=np.float32).tofile(f))
-    write_labels(out, labels.reshape(-1))
-    for key, name in (('train', 'trainIds.bin'), ('valid', 'valIds.bin'), ('test', 'testIds.bin')):
-        write_ids(out / name, split[key])
+    print('reading node-feat.csv.gz (2.4M rows x 100)', flush=True)
+    feat = pd.read_csv(raw / 'node-feat.csv.gz', header=None, dtype=np.float32).values
+    labels = pd.read_csv(raw / 'node-label.csv.gz', header=None, dtype=np.int64).values.reshape(-1)
+    if not (feat.shape[0] == labels.size > both.max()):
+        raise RuntimeError(f'inconsistent sizes: feat {feat.shape}, labels {labels.shape}, max node id {both.max()}')
+    print(f'nodes={feat.shape[0]:,} directed edges={both.shape[1]:,} feat={feat.shape}', flush=True)
+    write_atomic(out / 'srcList.bin', lambda f: both[0].astype(np.int32).tofile(f))
+    write_atomic(out / 'dstList.bin', lambda f: both[1].astype(np.int32).tofile(f))
+    write_atomic(out / 'feat.bin', lambda f: np.ascontiguousarray(feat, dtype=np.float32).tofile(f))
+    write_labels(out, labels)
+    split_dir = ogb_dir / 'split' / 'sales_ranking'
+    for csv, name in (('train.csv.gz', 'trainIds.bin'), ('valid.csv.gz', 'valIds.bin'), ('test.csv.gz', 'testIds.bin')):
+        write_ids(out / name, read_split_csv(split_dir / csv))
 
 
-# ---------------------------------------------------------------- ogbn-papers100M (streamed)
+# ---------------------------------------------------------------- ogbn-papers100M (npz, streamed)
 def open_npy_member(npz_path, member):
     """Return (zipfile, stream positioned at the data, shape, dtype) for one array of an npz."""
     zf = zipfile.ZipFile(npz_path)
@@ -143,59 +175,30 @@ def convert_papers(out, ogb_dir):
     write_labels(out, labels)
     split_dir = ogb_dir / 'split' / 'time'
     for csv, name in (('train.csv.gz', 'trainIds.bin'), ('valid.csv.gz', 'valIds.bin'), ('test.csv.gz', 'testIds.bin')):
-        with gzip.open(split_dir / csv, 'rt') as g:
-            write_ids(out / name, np.loadtxt(g, dtype=np.int64, delimiter=',').reshape(-1))
-
-
-def write_labels(out, labels):
-    labels = np.asarray(labels)
-    if np.issubdtype(labels.dtype, np.floating):          # papers100M: NaN = unlabeled
-        known = ~np.isnan(labels)
-        out_lab = np.full(labels.shape, -1, dtype=np.int64)
-        out_lab[known] = labels[known].astype(np.int64)
-    else:
-        out_lab = labels.astype(np.int64)
-    write_atomic(out / 'labels.bin', lambda f: out_lab.tofile(f))
-    print(f'  labels.bin: {out_lab.size:,} nodes, {int((out_lab >= 0).sum()):,} labeled, '
-          f'{int(out_lab.max()) + 1} classes', flush=True)
-
-
-def ensure_download(ogb_root, zip_name, folder):
-    """Download and extract <zip_name> into ogb_root unless <ogb_root>/<folder> already exists."""
-    target = ogb_root / folder
-    if target.is_dir():
-        return target
-    from ogb.utils.url import download_url, extract_zip
-    ogb_root.mkdir(parents=True, exist_ok=True)
-    path = download_url(OGB_URL + zip_name, str(ogb_root))
-    extract_zip(path, str(ogb_root))
-    os.unlink(path)
-    if not target.is_dir():
-        raise RuntimeError(f'{zip_name} did not extract to {target}')
-    return target
+        write_ids(out / name, read_split_csv(split_dir / csv))
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--dataset', choices=sorted(DATASETS), required=True)
-    ap.add_argument('--ogb-root', type=Path, default=_ROOT / 'data' / 'ogb',
-                    help='where OGB downloads are kept (default: data/ogb)')
     ap.add_argument('--ogb-dir', type=Path, default=None,
-                    help='ogbn-papers100M only: an already extracted papers100M-bin folder '
-                         '(holds raw/data.npz); skips the download')
+                    help='the extracted OGB folder (default: data/ogb/products or data/ogb/papers100M-bin)')
     ap.add_argument('--out-dir', type=Path, default=None,
                     help='default: data/raw/<products|papers100M>')
     args = ap.parse_args()
-    zip_name, folder, raw_name = DATASETS[args.dataset]
+    zip_name, folder, raw_name, marker = DATASETS[args.dataset]
+    ogb_dir = (args.ogb_dir or _ROOT / 'data' / 'ogb' / folder).resolve()
+    if not (ogb_dir / marker).is_file():
+        raise SystemExit(
+            f'{ogb_dir / marker} not found.\n'
+            f'Download {OGB_URL}{zip_name} and unzip it so that {ogb_dir} holds raw/ and split/, '
+            f'or point --ogb-dir at the extracted folder.')
     out = (args.out_dir or _ROOT / 'data' / 'raw' / raw_name).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    print(f'{args.dataset} -> {out}', flush=True)
+    print(f'{args.dataset}: {ogb_dir} -> {out}', flush=True)
     if args.dataset == 'ogbn-products':
-        convert_products(out, args.ogb_root.resolve())
+        convert_products(out, ogb_dir)
     else:
-        ogb_dir = args.ogb_dir.resolve() if args.ogb_dir else ensure_download(args.ogb_root.resolve(), zip_name, folder)
-        if not (ogb_dir / 'raw' / 'data.npz').is_file():
-            raise FileNotFoundError(f'{ogb_dir}/raw/data.npz not found')
         convert_papers(out, ogb_dir)
     print('done', flush=True)
 

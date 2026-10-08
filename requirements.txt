@@ -14,7 +14,7 @@ ninja
 
 # Data preprocessing
 pymetis==2025.2.2    # preprocess/do_metis_new.py
-ogb==1.3.6           # preprocess/convert_ogb_raw.py
+pandas==3.0.6        # preprocess/convert_ogb_raw.py (reads OGB's products CSVs)
 
 # Optional: training-curve PNGs (main/run_falcon.py); skipped if not installed.
 # matplotlib==3.10.8

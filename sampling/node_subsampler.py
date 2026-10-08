@@ -1,6 +1,6 @@
 """Per-epoch, cluster-preserving node subsampling for FALCON.  [Step B]
 
-Ported from Ginex_with_intra/lib/epoch_sampler.py (ClusterNodeSampler). Same math:
+Ported from our Ginex-based prototype (ClusterNodeSampler). Same math:
 keep a fraction p = 1/sqrt(factor) of the nodes uniformly at random *within each
 cluster*, redrawn every epoch, so the induced subgraph has ~p^2 * E edges while every
 cluster-size ratio and intra-/inter-cluster edge ratio is preserved (all scale by p^2).

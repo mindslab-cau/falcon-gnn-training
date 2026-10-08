@@ -1,7 +1,7 @@
 """Full-graph METIS partitioning -- no chunking.
 
-Replaces do_metis.py's chunked subgraph approach. With chunking
-(do_metis.py with --metis-chunk-size 1_000_000), 98%+ of edges crossed
+Replaces an earlier chunked approach (METIS run per 1M-node chunk): with chunking,
+98%+ of edges crossed
 chunk boundaries on papers100M, so METIS partitioned 112 disconnected
 node-id ranges. The result was perfectly balanced but had no community
 structure (modularity Q ~ 0.016, edge cut ratio 0.984).
@@ -17,12 +17,11 @@ Resource profile (papers100M, 111M nodes / 3.2B directed CSC entries):
     straight to METIS in memory, so we skip the gpmetis text-format step.
   - Time: 1-3 hours for k <= 32; longer for larger k.
 
-Outputs (matches do_metis.py contract):
+Outputs:
   - {output_dir}/part_id.pth
   - {output_dir}/conf.json    (snapshot of dataset conf + METIS keys)
 
-This script does NOT modify do_metis.py. By default it also does NOT
-modify the dataset's conf.json -- pass --update-dataset-conf to do so.
+By default this script does NOT modify the dataset's conf.json -- pass --update-dataset-conf to do so.
 
 Symmetry assumption:
   METIS treats the input as an undirected graph, so the CSC must be symmetric
@@ -312,9 +311,7 @@ def _run_pymetis(xadj_t, adjncy_t, K, recursive, verbose=False):
 
 
 def _write_summary_json(part_id, summary_path):
-    """Per-cluster node counts, same {num_partitions, counts} contract as
-    do_modularity.py's part_summary.json (data_clustering.py reads this in
-    full-cluster mode)."""
+    """Per-cluster node counts, written as {num_partitions, counts}."""
     print(f"Computing per-cluster counts and writing {summary_path}")
     t0 = time.time()
     K = int(part_id.max().item()) + 1
@@ -556,7 +553,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-dir", type=str, default=None,
         help="Where part_id.pth and conf.json are written. "
-             "Default: dataset directory (matches do_metis.py).",
+             "Default: cluster/<dataset>-k<k>/metis under the repo root.",
     )
     parser.add_argument(
         "--update-dataset-conf", action="store_true",

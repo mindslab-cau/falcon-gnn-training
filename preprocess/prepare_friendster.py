@@ -13,7 +13,7 @@ each column is sorted -- the canonical form prepare_dataset_sym.py produces for 
 (csc_layout "symmetric", self_loop true). SNAP ids are sparse (max ~124.8M for 65.6M
 nodes), so they are compacted to 0..N-1 in ascending SNAP-id order.
 
-Features / labels. Friendster has neither. As DiskGNN does (examples/load_graph.py,
+Features / labels. Friendster has neither. As DiskGNN does (its examples/load_graph.py,
 load_friendster(root, 128, 20)), features are uniform [0,1) float32 and labels are
 uniform random over num_classes. Both are seeded, so a rebuild is byte-identical.
 Accuracy on these labels is chance level by construction -- the dataset is for speed,
