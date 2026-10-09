@@ -122,7 +122,9 @@ python main/run_falcon.py --dataset products --data-dir data/reordered/products-
 | `--inter-keep-frac p` | fraction of inter-cluster neighbors kept (0 = intra-cluster edges only) |
 | `--gpu-cache-gb G` | size of the GPU feature cache; the paper used 0.1 for products and 2 for papers100M / Friendster |
 | `--screen` | skip val/test evaluation and time training only |
-| `--test-every N`, `--final-test K` | evaluate test every N epochs / re-evaluate the best-validation model K times at the end |
+| `--select-by val\|test` | which split picks the reported model; default `val`. `test` is the old behaviour and leaks test into model selection |
+| (always) | after training, the selected model is evaluated on test once more; that number is the reported test accuracy (skipped with `--screen`) |
+| `--test-every N` | also evaluate test every N epochs during training for the learning curve (default 1; 0 = never) |
 
 The first run compiles the two C++ samplers (`~/.cache/torch_extensions/`, 1-2 min).
 Epoch 0 is excluded from timing as cache warm-up.

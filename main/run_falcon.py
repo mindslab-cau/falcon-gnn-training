@@ -60,12 +60,12 @@ bench_cluster_batch 에서 A2(클러스터 단위 시드)가 products 14.5배로
   - fanout 10/10/10, bs 1024, sage h256 L3 dropout 0.2, lr 1e-3 (기본값)
   - 평가는 원본 전체 그래프 (필터 없음)
 
-**test leakage 있음**: 매 epoch val 과 test 를 둘 다 재고, best 모델을 **test 기준**으로
-고른다. 즉 여기서 나오는 best test 는 test 셋을 모델 선택에 쓴 값이라 낙관 편향이 있다 --
-학습 곡선을 보거나 디버깅할 때 쓰는 값이지, 보고용 수치가 아니다. 편향 없는 수치가 필요하면
-best 선택을 val 로 되돌릴 것(main 의 `if teacc > best['test_acc']` 한 줄).
-비용도 늘어난다: test 로더가 매 epoch 한 번 더 돌아 epoch 시간이 val 만큼 더 붙는다
-(papers 기준 test 214k > val 125k 라 val 보다 비싸다).
+모델 선택: 매 epoch val(과 --test-every 에 따라 test)을 재고, best 모델은 **val 기준**으로
+고른다(기본, --select-by val). 학습이 끝나면 그 best 모델로 test 를 한 번 더 잰다(--screen 이 아니면
+항상). 보고하는 test 정확도는 이 값이다.
+--select-by test 는 test 로 고르는 옛 동작으로, test 를 모델 선택에 쓰므로 낙관 편향(leakage)이
+있다 -- 학습 곡선 디버깅용이지 보고용이 아니다. 매 epoch test 를 재면 epoch 시간이 그만큼
+늘어나므로(papers 는 test 214k > val 125k) 긴 학습은 --test-every N (또는 0) 으로 줄이고 마지막 test 에 맡긴다.
 
 실행 (저장소 루트에서). 아래가 논문 측정에 쓴 전체 옵션이다 -- rtintra + node subsampling +
 candidate filter + seed chunking + 두 shuffle + GPU feature cache + pipeline + direct-pinned +
@@ -897,10 +897,11 @@ def _draw_figs(out_dir, config, hist, ep):
            + (f" c{config['chunk']}" if config['mode'] == 'cluster' else '')
            + f" · bs {config['batchsize']} · fanout {config['fanout']} · s{config['seed']}")
 
-    # 1) 정확도 곡선 -- best 는 test 기준으로 고르므로 test 에 기준선을 긋는다
+    # 1) 정확도 곡선 -- 기준선은 best 를 고른 기준(기본 val)의 최고 epoch 에 긋는다
     te = [v * 100 for v in col('test_acc')]
     va = [v * 100 for v in col('val_acc')]
-    bi = max(range(len(te)), key=lambda i: te[i])
+    pick = va if config.get('model_selection') == 'val_acc' else te
+    bi = max(range(len(pick)), key=lambda i: (pick[i] == pick[i], pick[i]))   # NaN 은 뒤로
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.plot(ep, te, marker='o', linewidth=2, markersize=4, color='#ff2b83',
             markerfacecolor='none', label='test')
@@ -909,7 +910,7 @@ def _draw_figs(out_dir, config, hist, ep):
     ax.plot(ep, [v * 100 for v in col('train_acc')], linewidth=1.0, color='#888',
             alpha=.6, label='train')
     ax.axhline(te[bi], color='#ff2b83', linestyle='--', linewidth=1.2,
-               label=f'Best test {te[bi]:.2f}% @ep{ep[bi]}')
+               label=f'test {te[bi]:.2f}% @ep{ep[bi]} ({"val" if pick is va else "test"}-best)')
     ax.set_title(sub); ax.set_xlabel('Epoch'); ax.set_ylabel('Accuracy (%)')
     ints(ax); ax.grid(True, linestyle='--', alpha=.5); ax.legend(loc='lower right')
     plt.tight_layout()
@@ -1044,11 +1045,11 @@ def main():
 
     ap.add_argument('--test-every', type=int, default=1, metavar='N',
                     help='test 평가를 N epoch 마다(그리고 마지막 epoch 에) 한다. val 은 매 epoch. 기본 1 = 매 epoch. '
-                         '0 = 학습 중에는 test 를 아예 안 잰다 (--final-test 와 같이 쓴다; best 는 val 로 고른다). '
+                         '0 = 학습 중에는 test 를 아예 안 잰다 (마지막 test 만 잰다; best 는 val 로 고른다). '
                          '건너뛴 epoch 의 test_acc 는 NaN 으로 기록된다.')
-    ap.add_argument('--final-test', type=int, default=0, metavar='K',
-                    help='학습이 끝난 뒤 val 이 가장 높았던 epoch 의 model 로 test 를 K 번(sampling seed 를 바꿔) 평가한다. '
-                         'best_test_acc 에는 K 번 중 최댓값을 기록하고, 개별값/평균/표준편차는 final_test_* 에 남긴다.')
+    ap.add_argument('--select-by', choices=['val', 'test'], default='val',
+                    help='best 모델을 고르는 기준. val(기본) = val 정확도가 가장 높은 epoch; 보고하는 test 는 그 epoch 의 값. '
+                         'test = test 로 고른다 (옛 동작; test 를 모델 선택에 쓰므로 낙관 편향이 있어 보고용으로 쓰면 안 된다).')
     ap.add_argument('--save-every-epoch', action='store_true',
                     help='매 epoch 끝에 model state 를 <out_dir>/ckpt_epNN.pt 로 저장한다 (런당 0.5~0.8MB x epochs). '
                          '--test-every 로 건너뛴 epoch 의 test 를 나중에 --eval-ckpts 로 채울 수 있다.')
@@ -1066,6 +1067,10 @@ def main():
     ap.add_argument('--out-dir', default=None,
                     help='meta/metrics/best_model/png 를 쓸 폴더 (기본: main/output/[tag/]<model>/<시간>_seedorder_...)')
     args = ap.parse_args()
+    # best 모델 선택 기준. --test-every 0 이면 학습 중 test 가 없으므로 val 로 고정한다.
+    args.select_on = 'val' if (args.select_by == 'val' or args.test_every == 0) else 'test'
+    if args.select_by == 'test' and args.select_on == 'val':
+        print('    [select-by] --test-every 0 과 함께라 val 기준으로 고른다', flush=True)
     if args.node_subsampling is None:
         args.node_subsampling = args.graph != 'original'
     if args.candidate_filter is None:
@@ -1155,7 +1160,7 @@ def main():
     # 끈 상태(기본)에서는 기존 이름과 같게 둔다 -- 켠 런만 구분되도록 꼬리에 붙인다.
     name += ('_pr1' if args.part_range else '') + ('_nd1' if args.rej_nodiscard else '')
     name += (f'_gcgb{args.gpu_cache_gb:g}' if args.gpu_cache_gb is not None else '')   # 용량 상한을 줬을 때만
-    name += (f'_te{args.test_every}' if args.test_every != 1 else '') + (f'_ft{args.final_test}' if args.final_test else '')   # 기본값이 아닐 때만
+    name += (f'_te{args.test_every}' if args.test_every != 1 else '')   # 기본값이 아닐 때만
     name += ('' if args.late_gather else '_lg0') + ('' if args.pin_memory else '_pin0') + ('' if args.gil_release else '_gil1')
     runs_dir = os.path.join(RUNS, args.tag) if args.tag else RUNS
     runs_dir = os.path.join(runs_dir, args.model)
@@ -1507,8 +1512,8 @@ def main():
         'num_nodes': N, 'featlen': Fdim, 'classes': n_cls,
         'framework': 'pyg+cpp_masked_sampler', 'version': 'seed_order',
         'eval_graph': 'original_full', 'eval_method': 'fanout_sampled',
-        'model_selection': 'val_acc' if (args.final_test > 0 or args.test_every == 0) else 'test_acc',   # test 선택은 leakage 있음
-        'test_every': args.test_every, 'save_every_epoch': args.save_every_epoch, 'final_test': args.final_test,
+        'model_selection': args.select_on + '_acc',   # 'val_acc' (기본) / 'test_acc' (--select-by test; leakage 있음)
+        'test_every': args.test_every, 'save_every_epoch': args.save_every_epoch,
     }
     if args.eval_ckpts:                                   # 저장된 체크포인트의 test 평가만 하고 끝낸다
         import csv as _csv
@@ -1684,9 +1689,8 @@ def main():
                 else:                                 # 이번 epoch 은 test 생략 (--test-every)
                     sp = None; teloss = teacc = float('nan'); t_test = 0.0
 
-            # best 선택: --final-test 를 쓰면 val 로 고른다 (leakage 없음). 아니면 test 로 (leakage 있음; test 를 잰 epoch 에서만 갱신).
-            select_val = args.final_test > 0 or args.test_every == 0
-            improved = (vacc > best['val_acc']) if select_val else (teacc == teacc and teacc > best['test_acc'])
+            # best 선택: 기본은 val (leakage 없음). --select-by test 는 test 로 고른다 (test 를 잰 epoch 에서만 갱신).
+            improved = (vacc > best['val_acc']) if args.select_on == 'val' else (teacc == teacc and teacc > best['test_acc'])
             if improved:
                 best.update(test_acc=teacc, val_acc=vacc, epoch=ep,
                             state=copy.deepcopy(model.state_dict()))
@@ -1732,48 +1736,49 @@ def main():
                 if vp: say(fmt_prof('val', vp, args.workers, train=False))
                 if sp: say(fmt_prof('test', sp, args.workers, train=False))
             # 남은 시간은 tqdm 이 epoch 소요시간으로 직접 낸다. postfix 는 지금 성적.
-            ep_bar.set_postfix_str(f'best test {max(best["test_acc"], 0):.4f} '
-                                   f'@ep{best["epoch"]}', refresh=False)
+            ep_bar.set_postfix_str(f'best val {max(best["val_acc"], 0):.4f} '
+                                   f'test {best["test_acc"]:.4f} @ep{best["epoch"]}', refresh=False)
             ep_bar.update(1)
             # 둘 다 매 epoch 통째로 다시 쓴다 -> 중간에 끊겨도 완료분은 남는다.
             json.dump(dict(args=vars(args), hist=hist, best_test=best['test_acc'],
                            best_val=best['val_acc'], best_epoch=best['epoch'],
-                           select_on='test'),
+                           select_on=args.select_on),
                       open(out_path, 'w'), indent=1)
             save_outputs(out_dir, config, hist, best, time.time() - t_start)
 
     ep_bar.close()
 
-    if args.final_test > 0 and best['state'] is not None:
-        # val 최고 epoch 의 model 로 test 를 K 번. 매번 새 loader 를 다른 seed 로 만들어 이웃 sampling 이 달라지게 한다.
+    if best['state'] is not None and not args.screen:   # --screen 은 평가 없음
+        # 학습이 끝나면 best 모델(기본 val 기준)로 test 를 한 번 더 잰다. 보고하는 test 정확도는 이 값이다.
         model.load_state_dict(best['state']); model.to(dev)
         seeds_te = torch.from_numpy(np.asarray(split['test'])).to(torch.int64)
-        accs = []
-        for k in range(args.final_test):
-            torch.manual_seed(args.seed * 31 + k + 1)
-            ld = wrap(Loader(rowptr_o, col_o, seeds_te, fan, x_all, y_all, node_mask=None, part_id=None,
-                             batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=PIN,
-                             persistent=False, profile=False, **_vkw))
-            t0 = time.time()
-            _, acc_k, _ = run_epoch(ld, model, None, dev, train=False, desc=f'final test {k + 1}/{args.final_test}', model_name=args.model)
-            accs.append(acc_k)
-            print(f'  final test {k + 1}/{args.final_test} (val-best ep{best["epoch"]}): {acc_k:.4f}  ({time.time() - t0:.0f}s)', flush=True)
+        torch.manual_seed(args.seed * 31 + 1)
+        ld = wrap(Loader(rowptr_o, col_o, seeds_te, fan, x_all, y_all, node_mask=None, part_id=None,
+                         batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=PIN,
+                         persistent=False, profile=False, **_vkw))
+        t0 = time.time()
+        _, acc_final, _ = run_epoch(ld, model, None, dev, train=False, desc='final test', model_name=args.model)
+        print(f'  final test (val-best ep{best["epoch"]}): {acc_final:.4f}  ({time.time() - t0:.0f}s)', flush=True)
+        accs = [acc_final]
         best['final_test'] = accs
-        best['test_acc'] = max(accs)                       # best_test_acc_pct = K 번 중 최댓값
+        best['test_acc'] = acc_final
         torch.save({'model_state': best['state'], 'config': config, 'epoch': best['epoch'],
                     'test_acc': best['test_acc'], 'val_acc': best['val_acc'], 'final_test': accs},
                    os.path.join(out_dir, 'best_model.pt'))
         save_outputs(out_dir, config, hist, best, time.time() - t_start)
 
-    # test 는 이미 매 epoch 쟀으므로 마지막에 다시 돌리지 않는다 -- best['state'] 의 test
-    # 정확도가 곧 best['test_acc'] 이고, 그 state 는 best_model.pt 로 이미 저장돼 있다.
+    # best['state'] 는 best_model.pt 로 이미 저장돼 있고, best['test_acc'] 는 그 epoch 의 test 값
+    # (--screen 이 아니면 위에서 마지막에 다시 잰 값) 이다.
     json.dump(dict(args=vars(args), hist=hist, best_test=best['test_acc'],
                    best_val=best['val_acc'], best_epoch=best['epoch'],
-                   test_acc=best['test_acc'], select_on='test'),
+                   test_acc=best['test_acc'], select_on=args.select_on),
               open(out_path, 'w'), indent=1)
     if best.get('final_test'):
-        print(f'\n  val-best ep {best["epoch"]} (val {best["val_acc"]:.4f}) -> final test x{len(best["final_test"])}: '
-              + ' '.join(f'{a:.4f}' for a in best['final_test']) + f'  max {best["test_acc"]:.4f}', flush=True)
+        print(f'\n  val-best ep {best["epoch"]} (val {best["val_acc"]:.4f}) -> final test {best["test_acc"]:.4f}', flush=True)
+    elif args.select_on == 'val':
+        print(f'\n  val-best ep {best["epoch"]} (val {best["val_acc"]:.4f}) -> test {best["test_acc"]:.4f}'
+              + ('  [그 epoch 에 test 를 안 쟀음]' if best['test_acc'] != best['test_acc'] else ''),
+              flush=True)
     else:
         print(f'\n  best test {best["test_acc"]:.4f} (ep {best["epoch"]}, '
               f'그때 val {best["val_acc"]:.4f})  [test 로 고른 값 -- leakage 있음]', flush=True)
