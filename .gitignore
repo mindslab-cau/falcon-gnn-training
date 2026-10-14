@@ -1,0 +1,49 @@
+# Datasets, partitions and training outputs live next to the code but never in git.
+# No trailing slash: these may be symlinks to a shared data location, and a
+# trailing-slash pattern only matches real directories.
+/data
+/cluster
+/main/output
+/main/runs
+
+# Large binary / tabular artifacts, wherever they appear
+*.dat
+*.bin
+*.npy
+*.npz
+*.pt
+*.pth
+*.csv
+*.csv.gz
+*.zip
+*.tar
+*.tar.gz
+*.png
+*.pdf
+
+# Logs and temp files
+*.log
+*.tmp
+nohup.out
+
+# Python / build
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+.env
+
+# Editors / tools
+.claude/
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
